@@ -1,0 +1,36 @@
+# Requirements pour EcoRoute Amélioré
+# Version compatible avec Python 3.12+
+
+# Core dependencies
+streamlit>=1.52.2
+pandas>=2.3.3
+plotly>=6.5.0
+
+# Géolocalisation
+geopy>=2.4.1
+
+# Assistant IA
+litellm>=1.80.10
+
+# Utilitaires
+python-dotenv>=1.2.1
+requests>=2.32.5
+
+# Optionnel - Pour les fonctionnalités avancées
+# Décommentez si nécessaire :
+
+# Pour carte interactive (Fonctionnalité #3)
+# folium>=0.14.0
+# streamlit-folium>=0.15.0
+
+# Pour export PDF (Fonctionnalité #5)
+# fpdf2>=2.7.0
+
+# Pour gamification avec base de données locale
+# sqlalchemy>=2.0.0
+
+# Pour cache des calculs
+# redis>=5.0.0
+
+# Pour météo (Fonctionnalité #11)
+# requests-cache>=1.1.0
