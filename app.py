@@ -57,7 +57,7 @@ with st.sidebar:
     st.header("🤖 Configuration IA")
     model_choice = st.radio("Modèle chatbot :", ["Groq (Rapide)", "Gemini (Smart)"])
     use_groq = True if "Groq" in model_choice else False
-    st.info(f"Actif : **{'Llama 3' if use_groq else 'Gemini 1.5'}**")
+    st.info(f"Actif : **{'Llama 3' if use_groq else 'Gemini 2.5'}**")
 
 # --- Inputs ---
 col1, col2, col3 = st.columns([2, 2, 1])
