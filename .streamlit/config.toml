@@ -1,0 +1,21 @@
+[theme]
+# 🎄 CHARTE GRAPHIQUE NOËL 🎄
+
+# Couleur principale (Boutons, Sliders, Sélection) -> Rouge Père Noël
+primaryColor = "#D42426"
+
+# Couleur de fond (Background) -> Blanc Neige (légèrement cassé pour les yeux)
+backgroundColor = "#FDFDFD"
+
+# Couleur de fond secondaire (Sidebar, Cartes) -> Vert Sapin très clair ou Blanc cassé
+secondaryBackgroundColor = "#F0F7F4"
+
+# Couleur du texte -> Gris anthracite (plus doux que le noir pur)
+textColor = "#2C3E50"
+
+# Police d'écriture (Optionnel, sans-serif fait plus moderne)
+font = "sans serif"
+
+[server]
+# Désactive la barre de développement en haut
+headless = true

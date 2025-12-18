@@ -6,7 +6,7 @@ import random
 # ---------------------------------------------------------
 # 🛑 MODE TEST : Mettez True pour économiser vos tokens !
 # Mettez False pour la démo finale.
-MOCK_MODE = True
+MOCK_MODE = False
 # ---------------------------------------------------------
 
 class EcoAssistant:
@@ -14,7 +14,7 @@ class EcoAssistant:
         # 📋 LISTE DE PRIORITÉ DES MODÈLES (Mise à jour 12/2025)
         self.models_priority = [
             "groq/llama-3.1-8b-instant",                # Groq (Llama 3.1)
-            "gemini/gemini-2.5-flash-lite",                  # Gemini 1.5 Flash
+            "gemini/gemini-2.5-flash-lite",                  # Gemini 2.5 Flash
             "huggingface/HuggingFaceH4/zephyr-7b-beta"  # Hugging Face (Zephyr)
         ]
 
