@@ -1,6 +1,13 @@
 from litellm import completion
 import os
 import streamlit as st
+import random
+
+# ---------------------------------------------------------
+# 🛑 MODE TEST : Mettez True pour économiser vos tokens !
+# Mettez False pour la démo finale.
+MOCK_MODE = True
+# ---------------------------------------------------------
 
 class EcoAssistant:
     def __init__(self):
@@ -15,8 +22,21 @@ class EcoAssistant:
     def _call_llm_with_fallback(self, messages, custom_priority=None):
         """
         Tente d'appeler les modèles en cascade.
-        Accepte une 'custom_priority' pour changer l'ordre à la volée.
+        Si MOCK_MODE est activé, renvoie une réponse simulée instantanément.
         """
+        
+        # --- 🛑 INTERCEPTION POUR LE MODE TEST ---
+        if MOCK_MODE:
+            # On simule une petite latence ou une réponse immédiate
+            return (
+                "🤖 **[MODE SIMULATION]**\n\n"
+                "J'économise vos tokens ! 💰\n"
+                "Si l'IA était active, elle aurait analysé votre demande avec pertinence.\n\n"
+                "Voici une réponse type : *'Le train est l'option la plus écologique pour ce trajet, "
+                "émettant 50x moins de CO2 que l'avion.'*"
+            )
+        # -----------------------------------------
+
         # On utilise la liste personnalisée si fournie, sinon celle par défaut
         priority_list = custom_priority if custom_priority else self.models_priority
         
@@ -41,6 +61,18 @@ class EcoAssistant:
 
     def analyze_trip(self, start, end, df_results):
         """Analyse du trajet (Force Gemini en premier car meilleur en raisonnement)."""
+        
+        # En mode MOCK, on renvoie une fausse analyse statique
+        if MOCK_MODE:
+            return (
+                "### 🌱 Analyse Rapide (Simulation)\n"
+                f"Pour aller de **{start}** à **{end}** :\n\n"
+                "- 🚄 **Le Train** est le grand gagnant (rapide et propre).\n"
+                "- 🚗 **La Voiture** émet beaucoup plus, surtout si vous êtes seul.\n"
+                "- ✈️ **L'Avion** est à éviter pour cette distance.\n\n"
+                "> *Note : Désactivez MOCK_MODE dans le code pour avoir la vraie analyse IA.*"
+            )
+        
         data_context = df_results.to_string()
         
         prompt = f"""

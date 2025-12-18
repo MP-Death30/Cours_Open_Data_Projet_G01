@@ -17,20 +17,13 @@ st.markdown("Comparez l'impact environnemental de vos trajets et faites le bon c
 # --- Sidebar : Configuration IA ---
 with st.sidebar:
     st.header("🤖 Configuration IA")
-    
-    # Sélecteur pour laisser l'utilisateur choisir son "cerveau"
     model_choice = st.radio(
         "Modèle pour le Chatbot :",
         ["Groq (Ultra-Rapide)", "Gemini (Raisonnement)"],
-        help="Groq est idéal pour la fluidité. Gemini est meilleur pour les analyses complexes.",
-        index=0 # Groq par défaut
+        index=0
     )
-    
-    # On transforme ce choix en booléen
     use_groq = True if "Groq" in model_choice else False
-    
     st.divider()
-    # Mise à jour des noms affichés
     st.info(f"Modèle actif : **{'Llama 3.1 (via Groq)' if use_groq else 'Gemini 1.5 Flash'}**")
 
 # --- Zone de saisie ---
@@ -40,80 +33,81 @@ with col1:
 with col2:
     end = st.text_input("📍 Ville d'arrivée", "Lyon")
 with col3:
-    st.write("") # Spacer pour aligner le bouton
     st.write("") 
-    # CORRECTION WARNING : width="stretch" au lieu de use_container_width=True pour les boutons récents
-    calc_btn = st.button("Calculer 🔍", type="primary") 
+    st.write("") 
+    calc_btn = st.button("Calculer 🔍", type="primary", use_container_width=True)
 
-# --- Résultat ---
+# --- GESTION DE LA MÉMOIRE (Session State) ---
+# C'est ici qu'on empêche le rechargement de tout effacer
+
+if "trip_result" not in st.session_state:
+    st.session_state.trip_result = None
+if "trip_dist" not in st.session_state:
+    st.session_state.trip_dist = 0
+
+# Si on clique sur le bouton, on lance le calcul ET on sauvegarde
 if calc_btn and start and end:
     with st.spinner("Calcul des itinéraires et analyse CO2..."):
-        # 1. Calculs via utils/data.py
         df_res, dist = calculate_trip(start, end)
-        
         if df_res is not None:
-            # Séparation en onglets
-            tab1, tab2, tab3 = st.tabs(["📊 Comparateur", "🤖 Analyse IA", "💬 Assistant"])
-            
-            with tab1:
-                # --- Onglet 1 : Graphiques et KPIs ---
-                best_mode = df_res.sort_values("CO2 (kg)").iloc[0]
-                worst_mode = df_res.sort_values("CO2 (kg)").iloc[-1]
-                
-                # Métriques
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Distance", f"{dist:.0f} km")
-                m2.metric("Meilleur choix", f"{best_mode['Mode']}", f"{best_mode['CO2 (kg)']} kg CO2")
-                m3.metric("Pire choix", f"{worst_mode['Mode']}", f"{worst_mode['CO2 (kg)']} kg CO2", delta_color="inverse")
-                
-                # Graphiques (CORRECTION WARNING : use_container_width est correct ici pour plotly, 
-                # mais si vous avez encore le warning, essayez sans paramètre car c'est souvent par défaut maintenant)
-                st.plotly_chart(create_comparison_chart(df_res), use_container_width=True)
-                
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.plotly_chart(create_efficiency_scatter(df_res), use_container_width=True)
-                with c2:
-                    # Petit calcul de ratio pour l'impact
-                    ratio = round(worst_mode['CO2 (kg)'] / max(best_mode['CO2 (kg)'], 0.1), 1)
-                    st.info(f"💡 Le train émet **{ratio}x moins** de CO2 que {worst_mode['Mode']} !")
-
-            with tab2:
-                # --- Onglet 2 : Analyse automatique du trajet ---
-                bot = EcoAssistant()
-                analysis = bot.analyze_trip(start, end, df_res)
-                st.markdown(analysis)
-                
-            with tab3:
-                # --- Onglet 3 : Chatbot interactif ---
-                st.write("Posez une question sur ce trajet ou l'écologie :")
-                
-                # Gestion de l'historique de chat
-                if "messages" not in st.session_state:
-                    st.session_state.messages = []
-
-                # Affichage des anciens messages
-                for msg in st.session_state.messages:
-                    st.chat_message(msg["role"]).write(msg["content"])
-
-                # Zone de saisie utilisateur
-                if prompt := st.chat_input("Ex: Comment réduire mon empreinte ?"):
-                    # 1. Afficher message user
-                    st.session_state.messages.append({"role": "user", "content": prompt})
-                    st.chat_message("user").write(prompt)
-                    
-                    # 2. Appeler l'IA avec le modèle choisi
-                    bot = EcoAssistant()
-                    
-                    # On injecte le contexte du trajet actuel
-                    context = f"Trajet {start}-{end}. Meilleur mode: {best_mode['Mode']}."
-                    
-                    # On passe le choix utilisateur
-                    response = bot.chat(prompt, context, use_groq=use_groq)
-                    
-                    # 3. Afficher réponse assistant
-                    st.session_state.messages.append({"role": "assistant", "content": response})
-                    st.chat_message("assistant").write(response)
-
+            st.session_state.trip_result = df_res
+            st.session_state.trip_dist = dist
+            # On vide l'historique de chat si on change de trajet
+            st.session_state.messages = [] 
         else:
-            st.error("Impossible de trouver ces villes. Essayez avec des grandes villes françaises (ex: Paris, Marseille, Bordeaux).")
+            st.error("Impossible de trouver ces villes.")
+
+# --- Affichage du Résultat (si disponible en mémoire) ---
+if st.session_state.trip_result is not None:
+    df_res = st.session_state.trip_result
+    dist = st.session_state.trip_dist
+    
+    # Séparation en onglets
+    tab1, tab2, tab3 = st.tabs(["📊 Comparateur", "🤖 Analyse IA", "💬 Assistant"])
+    
+    with tab1:
+        best_mode = df_res.sort_values("CO2 (kg)").iloc[0]
+        worst_mode = df_res.sort_values("CO2 (kg)").iloc[-1]
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Distance", f"{dist:.0f} km")
+        m2.metric("Meilleur choix", f"{best_mode['Mode']}", f"{best_mode['CO2 (kg)']} kg CO2")
+        m3.metric("Pire choix", f"{worst_mode['Mode']}", f"{worst_mode['CO2 (kg)']} kg CO2", delta_color="inverse")
+        
+        st.plotly_chart(create_comparison_chart(df_res), use_container_width=True)
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.plotly_chart(create_efficiency_scatter(df_res), use_container_width=True)
+        with c2:
+            ratio = round(worst_mode['CO2 (kg)'] / max(best_mode['CO2 (kg)'], 0.1), 1)
+            st.info(f"💡 Le train émet **{ratio}x moins** de CO2 que {worst_mode['Mode']} !")
+
+    with tab2:
+        # L'analyse est statique, on peut la relancer ou la stocker aussi
+        # Pour simplifier, on la relance (rapide avec le cache ou le mock)
+        bot = EcoAssistant()
+        analysis = bot.analyze_trip(start, end, df_res)
+        st.markdown(analysis)
+        
+    with tab3:
+        st.write("Posez une question sur ce trajet ou l'écologie :")
+        
+        if "messages" not in st.session_state:
+            st.session_state.messages = []
+
+        for msg in st.session_state.messages:
+            st.chat_message(msg["role"]).write(msg["content"])
+
+        if prompt := st.chat_input("Ex: Comment réduire mon empreinte ?"):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.chat_message("user").write(prompt)
+            
+            bot = EcoAssistant()
+            best_mode_name = df_res.sort_values("CO2 (kg)").iloc[0]['Mode']
+            context = f"Trajet {start}-{end}. Meilleur mode: {best_mode_name}."
+            
+            response = bot.chat(prompt, context, use_groq=use_groq)
+            
+            st.session_state.messages.append({"role": "assistant", "content": response})
+            st.chat_message("assistant").write(response)
