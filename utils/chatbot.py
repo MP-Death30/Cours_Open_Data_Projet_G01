@@ -1,13 +1,46 @@
 from litellm import completion
 import os
+import streamlit as st
 
 class EcoAssistant:
     def __init__(self):
-        self.model = "gemini/gemini-2.5-flash-lite"
-        self.api_key = os.getenv("GEMINI_API_KEY")
+        # 📋 LISTE DE PRIORITÉ DES MODÈLES (Mise à jour 12/2025)
+        self.models_priority = [
+            "groq/llama-3.1-8b-instant",                # Groq (Llama 3.1)
+            "gemini/gemini-2.5-flash-lite",                  # Gemini 1.5 Flash
+            "huggingface/HuggingFaceH4/zephyr-7b-beta"  # Hugging Face (Zephyr)
+        ]
+
+    # 👇 C'EST ICI QUE SE TROUVAIT L'ERREUR (Il manquait custom_priority=None)
+    def _call_llm_with_fallback(self, messages, custom_priority=None):
+        """
+        Tente d'appeler les modèles en cascade.
+        Accepte une 'custom_priority' pour changer l'ordre à la volée.
+        """
+        # On utilise la liste personnalisée si fournie, sinon celle par défaut
+        priority_list = custom_priority if custom_priority else self.models_priority
+        
+        errors = []
+        
+        for model in priority_list:
+            try:
+                # Appel via LiteLLM
+                response = completion(
+                    model=model,
+                    messages=messages
+                )
+                return response.choices[0].message.content
+                
+            except Exception as e:
+                error_msg = f"⚠️ Échec sur {model} : {str(e)}"
+                print(error_msg)
+                errors.append(error_msg)
+                continue
+        
+        return f"❌ Service indisponible. Tous les modèles ont échoué.\nDétails : {'; '.join(errors)}"
 
     def analyze_trip(self, start, end, df_results):
-        """Analyse le trajet et donne des conseils (Fonctionnalité 1 & 2)."""
+        """Analyse du trajet (Force Gemini en premier car meilleur en raisonnement)."""
         data_context = df_results.to_string()
         
         prompt = f"""
@@ -20,15 +53,31 @@ class EcoAssistant:
         2. Donne une équivalence concrète pour le CO2 économisé par le train (ex: nombre de repas végétariens, jours de chauffage...).
         3. Sois encourageant et pédagogique.
         """
+        messages = [{"role": "user", "content": prompt}]
         
-        response = completion(model=self.model, messages=[{"role": "user", "content": prompt}], api_key=self.api_key)
-        return response.choices[0].message.content
+        # Ordre spécifique pour l'analyse : Gemini d'abord
+        analysis_priority = [
+            "gemini/gemini-2.5-flash-lite",
+            "groq/llama-3.1-8b-instant",
+            "huggingface/HuggingFaceH4/zephyr-7b-beta"
+        ]
+        return self._call_llm_with_fallback(messages, custom_priority=analysis_priority)
 
-    def chat(self, user_question, context_str=""):
-        """Chatbot généraliste sur l'écologie (Fonctionnalité 3)."""
+    def chat(self, user_question, context_str="", use_groq=True):
+        """Chatbot interactif."""
         messages = [
             {"role": "system", "content": f"Tu es EcoBot, un assistant spécialisé dans l'impact carbone des transports. Contexte actuel : {context_str}"},
             {"role": "user", "content": user_question}
         ]
-        response = completion(model=self.model, messages=messages, api_key=self.api_key)
-        return response.choices[0].message.content
+        
+        if use_groq:
+            # Ordre standard : Groq -> Gemini -> HF
+            return self._call_llm_with_fallback(messages)
+        else:
+            # Ordre inversé : Gemini -> Groq -> HF
+            gemini_first = [
+                "gemini/gemini-2.5-flash-lite",
+                "groq/llama-3.1-8b-instant",
+                "huggingface/HuggingFaceH4/zephyr-7b-beta"
+            ]
+            return self._call_llm_with_fallback(messages, custom_priority=gemini_first)
