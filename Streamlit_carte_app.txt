@@ -1,0 +1,432 @@
+import streamlit as st
+import folium
+from streamlit_folium import st_folium
+import requests
+import math
+import pandas as pd
+
+# ---- CONFIG ----
+LOCATIONIQ_API_KEY = "Your API KEY HERE"
+
+# CO2 Emission factors (Source: ADEME Base Carbone - Approximate averages)
+# gCO2e per km per passenger
+EMISSION_FACTORS = {
+    "Car (driving)": 192,  # Thermal car / Voiture Thermique
+    "Car (Electric)": 20,  # Voiture Électrique
+    "Plane": 145,  # Short-haul with radiative forcing / Avion Court courrier
+    "Train": 2.4,  # High-speed rail (TGV)
+    "Train (Regional)": 5.2,  # Intercités
+    "Bus": 30,  # Autocar
+    "Bicycle": 0,  # Vélo
+    "Walking": 0  # Marche
+}
+
+st.set_page_config(page_title="Google Maps-like Route Planner", layout="centered")
+
+st.markdown(
+    """
+    <style>
+    .main-title {
+        font-size: 2rem;
+        font-weight: 600;
+        color: #1a73e8;
+        margin-bottom: 0.5rem;
+    }
+    .info-box {
+        background-color: #f0f4ff;
+        border-left: 4px solid #1a73e8;
+        padding: 1rem;
+        border-radius: 4px;
+        margin: 1rem 0;
+        font-size: 1.1rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+st.markdown('<div class="main-title">🚗 Google Maps-like Route Planner</div>', unsafe_allow_html=True)
+st.write("Enter two cities to see the route, distance, and estimated time for all transport modes!")
+
+col1, col2 = st.columns(2)
+with col1:
+    start_city = st.text_input("Start city", "Paris, France")
+with col2:
+    end_city = st.text_input("End city", "Lyon, France")
+
+mode = st.selectbox(
+    "Transport mode",
+    [
+        "Car (driving)",
+        "Bicycle",
+        "Walking",
+        "Train",
+        "Plane"
+    ]
+)
+
+if "route_data" not in st.session_state:
+    st.session_state.route_data = None
+if "error" not in st.session_state:
+    st.session_state.error = None
+
+
+def geocode_city(city):
+    url = f"https://us1.locationiq.com/v1/search.php"
+    params = {
+        "key": LOCATIONIQ_API_KEY,
+        "q": city,
+        "format": "json",
+        "limit": 1
+    }
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, list) and len(data) > 0:
+            lat = float(data[0]['lat'])
+            lon = float(data[0]['lon'])
+            return (lat, lon)
+        else:
+            return None
+    except Exception as e:
+        st.session_state.error = f"Geocoding error for '{city}': {e}"
+        return None
+
+
+def haversine_distance(coord1, coord2):
+    """Calculate straight-line distance between two coordinates in km"""
+    lat1, lon1 = coord1
+    lat2, lon2 = coord2
+    
+    R = 6371  # Earth's radius in km
+    
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    
+    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    
+    return R * c
+
+
+def calculate_all_modes_emissions(start_coords, end_coords):
+    """Calculate emissions for ALL transport modes for comparison"""
+    straight_distance = haversine_distance(start_coords, end_coords)
+    
+    # Road distance with detour
+    dist_road = straight_distance * 1.2
+    
+    results = []
+    for mode, factor in EMISSION_FACTORS.items():
+        # Distance adjusted by mode (Plane = direct, others = with detour)
+        if mode == "Plane":
+            d = straight_distance * 1.05
+        else:
+            d = dist_road
+        
+        co2_kg = (d * factor) / 1000
+        
+        results.append({
+            "Transport Mode": mode,
+            "Distance (km)": round(d, 1),
+            "CO2 (kg)": round(co2_kg, 2),
+            "Emission Factor (gCO2/km)": factor
+        })
+    
+    return pd.DataFrame(results)
+
+
+def calculate_smart_route(start_coords, end_coords, mode):
+    """Calculate route based on transport mode with realistic estimates"""
+    straight_distance = haversine_distance(start_coords, end_coords)
+    
+    # Mode-specific calculations
+    if mode == "Car (driving)":
+        # Roads add ~30% to straight-line distance
+        distance_km = straight_distance * 1.3
+        # Average speed: 80 km/h on highways
+        duration_hours = distance_km / 80
+        duration_min = duration_hours * 60
+        emission_factor = EMISSION_FACTORS["Car (driving)"]
+        
+    elif mode == "Bicycle":
+        # Bike routes add ~35% to straight-line distance
+        distance_km = straight_distance * 1.35
+        # Average cycling speed: 20 km/h
+        duration_hours = distance_km / 20
+        # Add rest breaks: 5 min per hour of cycling
+        rest_time_hours = duration_hours * (5/60)
+        total_hours = duration_hours + rest_time_hours
+        duration_min = total_hours * 60
+        emission_factor = EMISSION_FACTORS["Bicycle"]
+        
+    elif mode == "Walking":
+        # Walking routes add ~40% to straight-line distance
+        distance_km = straight_distance * 1.4
+        # Average walking speed: 5 km/h
+        duration_hours = distance_km / 5
+        # Add rest breaks: 10 min per hour of walking
+        rest_time_hours = duration_hours * (10/60)
+        total_hours = duration_hours + rest_time_hours
+        duration_min = total_hours * 60
+        emission_factor = EMISSION_FACTORS["Walking"]
+        
+    elif mode == "Train":
+        # Train routes follow rail lines (~20% longer)
+        distance_km = straight_distance * 1.2
+        # High-speed trains average 150 km/h, but add 30 min for boarding/transfers
+        travel_hours = distance_km / 150
+        duration_min = (travel_hours * 60) + 30
+        emission_factor = EMISSION_FACTORS["Train"]
+        
+    elif mode == "Plane":
+        # Flight distance is close to straight-line
+        distance_km = straight_distance * 1.05
+        
+        # For very short distances, flying doesn't make sense
+        if straight_distance < 200:
+            st.session_state.error = "✈️ Flying is not practical for distances under 200 km. Try another mode!"
+            return None
+        
+        # Calculate ONLY actual flight time (in air)
+        # Commercial jets cruise at ~800 km/h
+        flight_time_hours = distance_km / 800.0
+        duration_min = flight_time_hours * 60.0
+        emission_factor = EMISSION_FACTORS["Plane"]
+    
+    # Calculate CO2 emissions
+    co2_kg = (distance_km * emission_factor) / 1000.0
+    
+    return distance_km, duration_min, co2_kg, emission_factor
+
+
+def update_route(start_city, end_city, mode):
+    start_coords = geocode_city(start_city)
+    end_coords = geocode_city(end_city)
+    
+    if not start_coords or not end_coords:
+        if not st.session_state.error:
+            st.session_state.error = "❌ Could not geocode one or both cities. Please check the names."
+        st.session_state.route_data = None
+        return
+    
+    # For walking, cycling, and driving - try to get actual route from OSRM
+    if mode in ["Car (driving)", "Bicycle", "Walking"]:
+        profile_map = {
+            "Car (driving)": "driving",
+            "Bicycle": "bicycle",
+            "Walking": "foot"
+        }
+        osrm_profile = profile_map[mode]
+        
+        url = f"http://router.project-osrm.org/route/v1/{osrm_profile}/{start_coords[1]},{start_coords[0]};{end_coords[1]},{end_coords[0]}?overview=full&geometries=geojson"
+        
+        try:
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            
+            if data.get("routes"):
+                route = data['routes'][0]
+                coords = route['geometry']['coordinates']
+                route_latlon = [(lat, lon) for lon, lat in coords]
+                distance_km = route['distance'] / 1000
+                duration_min = route['duration'] / 60
+                
+                # Override OSRM duration for walking and cycling with realistic calculations
+                co2_kg = 0
+                if mode == "Walking":
+                    # Recalculate: 5 km/h + 10 min rest per hour
+                    duration_hours = distance_km / 5
+                    rest_hours = duration_hours * (10/60)
+                    duration_min = (duration_hours + rest_hours) * 60
+                    emission_factor = EMISSION_FACTORS["Walking"]
+                    co2_kg = (distance_km * emission_factor) / 1000
+                elif mode == "Bicycle":
+                    # Recalculate: 20 km/h + 5 min rest per hour
+                    duration_hours = distance_km / 20
+                    rest_hours = duration_hours * (5/60)
+                    duration_min = (duration_hours + rest_hours) * 60
+                    emission_factor = EMISSION_FACTORS["Bicycle"]
+                    co2_kg = (distance_km * emission_factor) / 1000
+                else:  # Car
+                    emission_factor = EMISSION_FACTORS["Car (driving)"]
+                    co2_kg = (distance_km * emission_factor) / 1000
+                
+                st.session_state.route_data = {
+                    "start_coords": start_coords,
+                    "end_coords": end_coords,
+                    "route_latlon": route_latlon,
+                    "start_city": start_city,
+                    "end_city": end_city,
+                    "distance_km": distance_km,
+                    "duration_min": duration_min,
+                    "mode": mode,
+                    "is_direct": False,
+                    "co2_kg": co2_kg,
+                    "emission_factor": emission_factor
+                }
+                st.session_state.error = None
+                return
+        except:
+            pass  # Fall through to smart calculation
+    
+    # For train, plane, or if OSRM fails - use smart calculations
+    result = calculate_smart_route(start_coords, end_coords, mode)
+    
+    if result is None:
+        st.session_state.route_data = None
+        return
+    
+    distance_km, duration_min, co2_kg, emission_factor = result
+    
+    # Create a simple straight line for train/plane
+    route_latlon = [start_coords, end_coords]
+    
+    st.session_state.route_data = {
+        "start_coords": start_coords,
+        "end_coords": end_coords,
+        "route_latlon": route_latlon,
+        "start_city": start_city,
+        "end_city": end_city,
+        "distance_km": distance_km,
+        "duration_min": duration_min,
+        "mode": mode,
+        "is_direct": mode in ["Train", "Plane"],
+        "co2_kg": co2_kg,
+        "emission_factor": emission_factor
+    }
+    st.session_state.error = None
+
+
+if st.button("Show Route", use_container_width=True):
+    update_route(start_city, end_city, mode)
+
+if st.session_state.error:
+    st.error(st.session_state.error)
+elif st.session_state.route_data is not None:
+    data = st.session_state.route_data
+    
+    # Format time display
+    hours = int(data["duration_min"] // 60)
+    minutes = int(data["duration_min"] % 60)
+    
+    # For long durations, show days too
+    time_str = ""
+    if hours >= 24:
+        days = hours // 24
+        remaining_hours = hours % 24
+        time_str = f"{days}d {remaining_hours}h {minutes}m"
+    else:
+        time_str = f"{hours}h {minutes}m"
+    
+    # Add emoji based on mode
+    mode_emoji = {
+        "Car (driving)": "🚗",
+        "Bicycle": "🚴",
+        "Walking": "🚶",
+        "Train": "🚄",
+        "Plane": "✈️"
+    }
+    
+    emoji = mode_emoji.get(data["mode"], "🚗")
+    
+    st.markdown(
+        f'''<div class="info-box">
+        {emoji} <strong>{data["mode"]}</strong>   |   📏 Distance: {data["distance_km"]:.1f} km   |   ⏱️ Time: {time_str}   |   🌱 CO2: {data["co2_kg"]:.2f} kg
+        </div>''',
+        unsafe_allow_html=True
+    )
+    
+    # Show CO2 comparison
+    st.markdown("---")
+    st.subheader("🌍 Environmental Impact - All Transport Modes")
+    
+    # Create comprehensive comparison dataframe
+    df_all = calculate_all_modes_emissions(data["start_coords"], data["end_coords"])
+    df_all = df_all.sort_values("CO2 (kg)")
+    
+    # Highlight the current mode in the dataframe
+    def highlight_current_mode(row):
+        mode_mapping = {
+            "Car (driving)": "Car (driving)",
+            "Bicycle": "Bicycle",
+            "Walking": "Walking",
+            "Train": "Train",
+            "Plane": "Plane"
+        }
+        
+        if mode_mapping.get(data["mode"]) == row["Transport Mode"]:
+            return ['background-color: #e3f2fd'] * len(row)
+        return [''] * len(row)
+    
+    styled_df = df_all.style.apply(highlight_current_mode, axis=1)
+    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+    
+    # Show savings potential
+    current_mode_mapping = {
+        "Car (driving)": "Car (driving)",
+        "Bicycle": "Bicycle",
+        "Walking": "Walking",
+        "Train": "Train",
+        "Plane": "Plane"
+    }
+    
+    current_mode_name = current_mode_mapping.get(data["mode"])
+    if current_mode_name:
+        current_row = df_all[df_all["Transport Mode"] == current_mode_name]
+        if not current_row.empty:
+            current_co2 = current_row.iloc[0]["CO2 (kg)"]
+            cleanest = df_all.iloc[0]
+            
+            if current_co2 > cleanest["CO2 (kg)"] and cleanest["CO2 (kg)"] > 0:
+                savings = current_co2 - cleanest["CO2 (kg)"]
+                st.success(f"💡 **Eco-Tip**: Switching to **{cleanest['Transport Mode']}** would save **{savings:.2f} kg** of CO2 emissions!")
+            elif current_co2 == 0:
+                st.success(f"🌟 **Excellent choice!** You're using a zero-emission transport mode!")
+    
+    st.markdown("---")
+    
+    # Add note for direct routes
+    if data["is_direct"]:
+        st.info(f"ℹ️ Showing direct {data['mode'].lower()} route. Actual path may vary based on rail lines or flight paths.")
+    
+    m = folium.Map(
+        location=[(data["start_coords"][0]+data["end_coords"][0])/2,
+                  (data["start_coords"][1]+data["end_coords"][1])/2],
+        zoom_start=6,
+        tiles="OpenStreetMap"
+    )
+    
+    folium.Marker(
+        location=data["start_coords"],
+        popup=f"Start: {data['start_city']}",
+        icon=folium.Icon(color='green', icon='play')
+    ).add_to(m)
+    
+    folium.Marker(
+        location=data["end_coords"],
+        popup=f"End: {data['end_city']}",
+        icon=folium.Icon(color='red', icon='stop')
+    ).add_to(m)
+    
+    # Different line styles for different modes
+    if data["is_direct"]:
+        # Dashed line for train/plane
+        folium.PolyLine(
+            locations=data["route_latlon"],
+            color='#1a73e8',
+            weight=4,
+            opacity=0.6,
+            dash_array='10, 10'
+        ).add_to(m)
+    else:
+        # Solid line for road-based routes
+        folium.PolyLine(
+            locations=data["route_latlon"],
+            color='#1a73e8',
+            weight=7,
+            opacity=0.8
+        ).add_to(m)
+    
+    st_folium(m, width=800, height=500)
